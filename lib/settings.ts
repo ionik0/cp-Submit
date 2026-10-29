@@ -1,6 +1,6 @@
 import { storage } from 'wxt/utils/storage';
 import type { ThemeId } from './themes';
-import type { LangFamily, PlatformId, Problem } from './types';
+import type { LangFamily, PlatformId } from './types';
 
 export type ThemePref = 'system' | 'light' | 'dark' | ThemeId;
 
@@ -81,6 +81,3 @@ export async function clearSavedCode(): Promise<number> {
 }
 
 export const savedCount = async () => (await indexItem.getValue()).length;
-
-/** The last problem opened, so the panel can still show its code from other pages or after a restart. */
-export const lastProblemItem = storage.defineItem<Problem | null>('local:lastProblem', { fallback: null });

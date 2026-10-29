@@ -28,7 +28,6 @@ import {
 } from '@/lib/session';
 import {
   DEFAULT_SETTINGS,
-  lastProblemItem,
   loadCode,
   saveCode,
   type Settings,
@@ -81,6 +80,10 @@ const OFF_PROBLEM_NOTICE = `/*
 
   Your code is saved per problem — open the problem
   again and it will be right where you left it.
+
+  • Found a bug or have an idea? Raise an issue or
+    contribute on GitHub:
+      https://github.com/ionik0/cp-extension
 */
 `;
 
@@ -103,17 +106,6 @@ export default function App() {
   const [submitBusy, setSubmitBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const submitLock = useRef(false);
-  // Last problem's saved code, shown read-only when the panel opens away from a problem page.
-  const [saved, setSaved] = useState<{ problem: Problem; code: string; family: LangFamily } | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      const problem = await lastProblemItem.getValue();
-      const draft = problem && (await loadCode(problem.key));
-      const family = draft?.family ?? (Object.keys(draft?.codes ?? {})[0] as LangFamily | undefined);
-      if (problem && draft && family) setSaved({ problem, code: draft.codes[family] ?? '', family });
-    })();
-  }, []);
 
   useEffect(() => {
     if (!cooldown) return;
@@ -177,7 +169,6 @@ export default function App() {
     setLoaded({ platform, problem, tabId });
     setTests(testsFromSamples(problem));
     setCtx({ kind: 'loading' });
-    void lastProblemItem.setValue(problem);
 
     const [draft, c] = await Promise.all([
       loadCode(problem.key),
@@ -278,15 +269,9 @@ export default function App() {
     }
   };
 
-  // Editing is only live while the active tab is a problem page; elsewhere the saved code is shown read-only.
+  // Editor is live only while the active tab is a problem page (like Codeforces Lite); elsewhere a notice is shown.
+  // Code stays saved per problem and returns when the user is back on it.
   const onProblem = !!loaded && !!activeUrl && loaded.platform.isProblemUrl(activeUrl);
-  const pinned = loaded ? { problem: loaded.problem, code, family } : saved;
-
-  const openProblemTab = async (p: Problem) => {
-    const tabId = loaded?.problem.key === p.key ? loaded.tabId : undefined;
-    const ok = tabId != null && (await browser.tabs.update(tabId, { active: true }).catch(() => null));
-    if (!ok) await browser.tabs.create({ url: p.url });
-  };
   const canAct = !!loaded && ctx.kind === 'ok' && !!langId && !loading;
   const running = tests.some((t) => t.result === 'running');
 
@@ -443,34 +428,8 @@ export default function App() {
           <SettingsView settings={settings} onSettings={updateSettings} templates={templates} editorTheme={editorTheme} />
         </div>
       ) : !onProblem || !loaded ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          {pinned && (
-            <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-1.5 text-xs dark:border-zinc-800">
-              <span className="min-w-0 flex-1 truncate text-zinc-500">
-                Saved code · <b className="text-zinc-800 dark:text-zinc-200">{pinned.problem.name}</b> (read-only here)
-              </span>
-              <button className="shrink-0 text-blue-600 hover:underline dark:text-blue-400" onClick={() => void openProblemTab(pinned.problem)}>
-                Open problem
-              </button>
-            </div>
-          )}
-          <div className="min-h-0 flex-1">
-            <CodeEditor
-              value={pinned ? pinned.code : OFF_PROBLEM_NOTICE}
-              onChange={() => {}}
-              language={pinned ? monacoLanguage(pinned.family) : 'cpp'}
-              theme={editorTheme}
-              readOnly
-              prefs={settings}
-            />
-          </div>
-          {subs.length > 0 && (
-            <div className="max-h-48 space-y-1.5 overflow-y-auto border-t border-zinc-200 p-2 dark:border-zinc-800">
-              {subs.map((s) => (
-                <SubmissionRow key={s.key} sub={s} />
-              ))}
-            </div>
-          )}
+        <div className="min-h-0 flex-1">
+          <CodeEditor value={OFF_PROBLEM_NOTICE} onChange={() => {}} language="cpp" theme={editorTheme} readOnly prefs={settings} />
         </div>
       ) : (
         <>
