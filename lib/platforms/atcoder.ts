@@ -57,6 +57,12 @@ export function parseAcVerdictRow(row: Element): Verdict | null {
   };
 }
 
+/** Parses the status `<td>` cells returned by AtCoder's status JSON, reusing the row parser. */
+export function parseAcStatusCells(html: string, id: string): Verdict | null {
+  const doc = parseHtml(`<table><tbody><tr>${html}<td><a href="/submissions/${id}"></a></td></tr></tbody></table>`);
+  return parseAcVerdictRow(doc.querySelector('tr')!);
+}
+
 function normalizeNl(s: string): string {
   return s.replace(/\r\n?/g, '\n');
 }
@@ -178,6 +184,13 @@ export const atcoder: Platform = {
   },
 
   async fetchVerdict(io, p, id) {
+    if (id) {
+      // The small JSON endpoint AtCoder's own submissions page polls; fall back to the full page if it changes.
+      const res = await io.request({ url: `${ORIGIN}/${p.base}/submissions/me/status/json?sids[]=${id}` });
+      const cells = parseJson<{ Result?: Record<string, { Html?: string }> }>(res)?.Result?.[id]?.Html;
+      const v = cells && parseAcStatusCells(cells, id);
+      if (v) return v;
+    }
     const url = `${ORIGIN}/${p.base}/submissions/me?f.Task=${encodeURIComponent(p.index)}`;
     const res = await io.request({ url });
     if (!res.ok || isChallenge(res)) return null;

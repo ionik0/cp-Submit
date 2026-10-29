@@ -51,23 +51,32 @@ export async function loadContext(platform: Platform, problem: Problem, tabId?: 
 export const helperTabs = new Set<number>();
 
 /**
- * Direct same-origin POST from the platform tab when the form allows it. If the site requires a human check,
- * submit through its real page (shown briefly, so the check can run), then return to the problem tab.
+ * Fast path: one same-origin POST from the problem tab, using the form context loaded when the problem opened
+ * plus the live form on the problem page (fresh hidden fields and any human-check token it already earned).
+ * Only if that is impossible or challenged: submit through the site's real page, then return to the problem.
  */
 export async function submitSolution(
   platform: Platform,
   problem: Problem,
   tabId: number | undefined,
+  cached: SubmitContext | null,
   langId: string,
   code: string,
   onStatus: (msg: string) => void,
 ): Promise<SubmitResult> {
   const t = await acquireTab(platform.origin, tabId);
   try {
-    const c = await loadContextWith(t.io, platform, problem);
-    if (c.kind === 'logged-out' || c.kind === 'error') return c;
-    if (c.kind === 'ok' && !c.ctx.humanCheck) {
-      const out = await platform.submit(t.io, problem, c.ctx, langId, code);
+    let ctx = cached;
+    if (!ctx) {
+      const c = await loadContextWith(t.io, platform, problem);
+      if (c.kind === 'logged-out' || c.kind === 'error') return c;
+      ctx = c.kind === 'ok' ? c.ctx : null;
+    }
+    const live = t.io.tabId === tabId ? await t.io.harvest().catch(() => null) : null;
+    if (ctx && (!ctx.humanCheck || live?.token)) {
+      const csrf = live?.fields.find(([k]) => k === 'csrf_token')?.[1] || ctx.csrf;
+      const use = live ? { ...ctx, hidden: live.fields, csrf } : ctx;
+      const out = await platform.submit(t.io, problem, use, langId, code);
       if (out.kind !== 'challenge') return out.kind === 'submitted' ? { ...out, via: 'direct' } : out;
     }
     const baselineId = (await platform.fetchVerdict(t.io, problem, null).catch(() => null))?.id ?? null;
@@ -149,6 +158,8 @@ export async function trackVerdict(
   let current = id;
   let last: Verdict | null = null;
   while (Date.now() < deadline) {
+    // The judge needs a moment before there is anything new to see; then check every second.
+    await sleep(last ? 1000 : 800);
     const t = await acquireTab(platform.origin, tabId);
     try {
       const v = await platform.fetchVerdict(t.io, problem, current);
@@ -163,7 +174,6 @@ export async function trackVerdict(
     } finally {
       t.release();
     }
-    await sleep(current ? 1500 : 2500);
   }
   return last;
 }

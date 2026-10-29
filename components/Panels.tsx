@@ -25,6 +25,8 @@ export interface Submission {
   verdict?: Verdict;
   /** Reopens the real submit page with the code filled in. */
   reopen?: () => void;
+  /** e.g. "sent in 0.6s · verdict after 3.1s" */
+  timing?: string;
 }
 
 // Per-problem stopwatch: `elapsed` banked ms, `since` = start time while running (null when stopped).
@@ -210,6 +212,7 @@ export function SubmissionRow({ sub }: { sub: Submission }) {
       </div>
       <div className={`text-xs font-semibold ${color} ${v && !v.final ? 'animate-pulse' : ''}`}>{sub.state === 'error' ? 'Failed' : label}</div>
       {(v?.time || v?.memory) && <div className="text-[11px] text-zinc-500">{[v.time, v.memory].filter(Boolean).join(' · ')}</div>}
+      {sub.timing && <div className="text-[11px] text-zinc-500">⏱ {sub.timing}</div>}
       {sub.message && <div className="mt-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">{sub.message}</div>}
       {sub.reopen && !v?.final && (
         <button className="mt-1 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400" onClick={sub.reopen}>

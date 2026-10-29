@@ -44,6 +44,26 @@ function readHtml(): string {
   return document.documentElement.outerHTML;
 }
 
+export interface Harvest {
+  fields: [string, string][];
+  /** A human-check token the page already earned (Turnstile/reCAPTCHA), if any. */
+  token: boolean;
+}
+
+/**
+ * Runs in the problem tab (MAIN world): reads the page's own submit form — Codeforces' sidebar form,
+ * AtCoder's task-page form — including any human-check token, so a direct POST needs no extra round trip.
+ */
+export function harvestForm(): Harvest | null {
+  const form = document.querySelector('select[name="programTypeId"], select[name="data.LanguageId"]')?.closest('form');
+  if (!form) return null;
+  const fields: [string, string][] = [];
+  new FormData(form).forEach((v, k) => typeof v === 'string' && fields.push([k, v]));
+  const tokenEl = document.querySelector<HTMLInputElement>('[name="cf-turnstile-response"], [name="g-recaptcha-response"]');
+  if (tokenEl?.value && !fields.some(([k]) => k === tokenEl.name)) fields.push([tokenEl.name, tokenEl.value]);
+  return { fields, token: !!tokenEl?.value };
+}
+
 export type FillResult = 'submitted' | 'needs-user' | 'no-form';
 
 /**
@@ -108,6 +128,11 @@ export class TabIO implements PageIO {
       args: [names],
     });
     return (r?.result as Record<string, string | null>) ?? {};
+  }
+
+  async harvest(): Promise<Harvest | null> {
+    const [r] = await browser.scripting.executeScript({ target: { tabId: this.tabId }, world: 'MAIN', func: harvestForm });
+    return (r?.result as Harvest | null | undefined) ?? null;
   }
 
   async html(): Promise<string> {

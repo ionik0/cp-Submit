@@ -65,7 +65,7 @@ function templateFor(templates: Templates, family: LangFamily) {
 
 const btn = 'rounded px-3 py-1 text-xs font-medium text-white disabled:opacity-40';
 // Pause between submissions: avoids CF/AtCoder rate limits and duplicate submits.
-const SUBMIT_COOLDOWN_S = 10;
+const SUBMIT_COOLDOWN_S = 5;
 
 const OFF_PROBLEM_NOTICE = `/*
   Code Editor Access:
@@ -307,7 +307,9 @@ export default function App() {
     const key = crypto.randomUUID();
     setTab('submissions');
     setSubs((ss) => [{ key, title: `${platform.label} · ${problem.name}`, url: problem.url, state: 'submitting' }, ...ss]);
-    const r = await submitSolution(platform, problem, tabId, langId, code, (message) => updateSub(key, { message }))
+    const startedAt = performance.now();
+    const cachedCtx = ctx.kind === 'ok' ? ctx.ctx : null;
+    const r = await submitSolution(platform, problem, tabId, cachedCtx, langId, code, (message) => updateSub(key, { message }))
       .catch((e: unknown) => ({ kind: 'error' as const, message: String(e) }))
       .finally(() => {
         submitLock.current = false;
@@ -330,9 +332,14 @@ export default function App() {
     } else {
       updateSub(key, { state: 'tracking', message: r.via === 'page' ? 'Submitted via the site’s own form (human check passed).' : undefined });
     }
+    const sentMs = performance.now() - startedAt;
     const id = r.kind === 'submitted' ? r.submissionId : null;
     const v = await trackVerdict(platform, problem, tabId, id, r.baselineId ?? null, (v) =>
-      updateSub(key, { verdict: v, state: v.final ? 'done' : 'tracking' }),
+      updateSub(key, {
+        verdict: v,
+        state: v.final ? 'done' : 'tracking',
+        timing: `sent in ${secs(sentMs)}${v.final ? ` · verdict after ${secs(performance.now() - startedAt - sentMs)}` : ''}`,
+      }),
     );
     if (!v) updateSub(key, { state: 'error', message: 'Stopped tracking — check your submissions page.' });
   };

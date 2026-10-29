@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseHtml } from '../html';
-import { atcoder, parseAcUrl, parseAcVerdictRow, readAcCustomResult } from './atcoder';
+import { atcoder, parseAcStatusCells, parseAcUrl, parseAcVerdictRow, readAcCustomResult } from './atcoder';
 
 const TASK_HTML = `
 <span class="h2">A - Product <a class="btn btn-default btn-sm">Editorial</a></span>
@@ -85,6 +85,16 @@ describe('atcoder', () => {
       time: '1 ms',
       memory: '3628 KiB',
     });
+  });
+
+  it('parses the lightweight status JSON cells', () => {
+    expect(parseAcStatusCells('<td class="text-center"><span class="label label-default" title="Judging">3/12</span></td>', '77')).toMatchObject({
+      id: '77',
+      final: false,
+    });
+    expect(
+      parseAcStatusCells('<td class="text-center"><span class="label label-success" title="Accepted">AC</span></td><td>2 ms</td><td>3916 KiB</td>', '77'),
+    ).toMatchObject({ id: '77', final: true, ok: true, time: '2 ms', memory: '3916 KiB' });
   });
 
   it('reads custom test results in plain and base64 form, ignoring stale runs', () => {
