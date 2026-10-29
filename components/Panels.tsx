@@ -27,26 +27,40 @@ export interface Submission {
   reopen?: () => void;
 }
 
-const timerStarts = new Map<string, number>();
+// Per-problem stopwatch: `elapsed` banked ms, `since` = start time while running (null when stopped).
+const timers = new Map<string, { elapsed: number; since: number | null }>();
 
 export function Timer({ id }: { id: string }) {
-  const [, tick] = useState(0);
+  const [, rerender] = useState(0);
+  const t = timers.get(id) ?? { elapsed: 0, since: null };
+  const running = t.since != null;
+
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-  if (!timerStarts.has(id)) timerStarts.set(id, Date.now());
-  const s = Math.floor((Date.now() - timerStarts.get(id)!) / 1000);
+    if (!running) return;
+    const i = setInterval(() => rerender((n) => n + 1), 1000);
+    return () => clearInterval(i);
+  }, [running, id]);
+
+  const set = (next: typeof t) => (timers.set(id, next), rerender((n) => n + 1));
+  const ms = t.elapsed + (running ? Date.now() - t.since! : 0);
+  const s = Math.floor(ms / 1000);
   const pad = (n: number) => String(n).padStart(2, '0');
   const text = `${s >= 3600 ? `${Math.floor(s / 3600)}:` : ''}${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+  const btn = 'rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800';
+
   return (
-    <button
-      className="mt-0.5 shrink-0 font-mono text-[11px] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-      title="Time on this problem — click to restart"
-      onClick={() => (timerStarts.set(id, Date.now()), tick((n) => n + 1))}
-    >
-      {text}
-    </button>
+    <div className="mt-0.5 flex shrink-0 items-center gap-0.5" title="Time on this problem">
+      <span className={`font-mono text-[11px] ${running ? 'text-zinc-800 dark:text-zinc-200' : 'text-zinc-500'}`}>{text}</span>
+      <button
+        className={`${btn} ${running ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+        onClick={() => set(running ? { elapsed: ms, since: null } : { elapsed: t.elapsed, since: Date.now() })}
+      >
+        {running ? 'Stop' : 'Start'}
+      </button>
+      <button className={`${btn} text-zinc-500`} title="Restart from 00:00" onClick={() => set({ elapsed: 0, since: null })}>
+        ↺
+      </button>
+    </div>
   );
 }
 
