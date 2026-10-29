@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/icon.svg" width="96" alt="CP Submit icon" />
+
 # CP Submit
 
 ### Write, test and submit **Codeforces** & **AtCoder** solutions from your browser's side panel, without getting stuck on anti-bot checks.
@@ -7,6 +9,7 @@
 ![Codeforces](https://img.shields.io/badge/Codeforces-supported-1f8acb?style=for-the-badge&logo=codeforces&logoColor=white)
 ![AtCoder](https://img.shields.io/badge/AtCoder-supported-222222?style=for-the-badge)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -245,6 +248,14 @@ lib/
 ```
 
 **Adding a judge** means one new file in `lib/platforms/` that implements the `Platform` interface: parse the problem, describe the submit form, submit, poll verdicts and run a custom test.
+
+---
+
+## Contributing & license
+
+Bugs, ideas and pull requests are welcome. Open an [issue](../../issues) or a [pull request](../../pulls).
+
+Released under the [MIT License](LICENSE).
 
 ---
 

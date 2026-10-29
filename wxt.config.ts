@@ -32,7 +32,8 @@ export default defineConfig({
     ...(browser === 'firefox' && {
       browser_specific_settings: {
         gecko: {
-          id: 'cp-submit@local',
+          // Permanent: Firefox ties updates to this ID.
+          id: 'cp-extension@ionik0',
           strict_min_version: '128.0',
           // Nothing is collected: code and settings stay in the browser; requests go only to Codeforces/AtCoder.
           data_collection_permissions: { required: ['none'] },
