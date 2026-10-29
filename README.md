@@ -122,8 +122,8 @@ There are also **Light**, **Dark** and **System** themes. Each theme re-tints bo
 ### From source
 
 ```bash
-git clone https://github.com/ionik0/cp-extension.git
-cd cp-extension
+git clone https://github.com/ionik0/cp-Submit.git
+cd cp-Submit
 npm install
 npm run build            # → .output/chrome-mv3   (Chrome, Brave)
 npm run build:edge       # → .output/edge-mv3

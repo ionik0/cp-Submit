@@ -29,11 +29,13 @@ export default defineConfig({
     ],
     host_permissions: ['https://codeforces.com/*', 'https://atcoder.jp/*'],
     action: { default_title: 'Open CP Submit' },
+    // Side panel API + scripting in the page's MAIN world are stable from Chrome 116 (also Edge/Brave).
+    ...(browser !== 'firefox' && browser !== 'safari' && { minimum_chrome_version: '116' }),
     ...(browser === 'firefox' && {
       browser_specific_settings: {
         gecko: {
           // Permanent: Firefox ties updates to this ID.
-          id: 'cp-extension@ionik0',
+          id: 'cp-submit@ionik0',
           strict_min_version: '128.0',
           // Nothing is collected: code and settings stay in the browser; requests go only to Codeforces/AtCoder.
           data_collection_permissions: { required: ['none'] },

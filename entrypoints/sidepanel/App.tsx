@@ -83,7 +83,7 @@ const OFF_PROBLEM_NOTICE = `/*
 
   • Found a bug or have an idea? Raise an issue or
     contribute on GitHub:
-      https://github.com/ionik0/cp-extension
+      https://github.com/ionik0/cp-Submit
 */
 `;
 

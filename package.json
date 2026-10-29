@@ -1,9 +1,9 @@
 {
-  "name": "cp-extension",
+  "name": "cp-submit",
   "description": "Submit and test Codeforces & AtCoder solutions from a side panel, through your own browser session.",
   "version": "0.1.0",
   "license": "MIT",
-  "repository": "github:ionik0/cp-extension",
+  "repository": "github:ionik0/cp-Submit",
   "private": true,
   "type": "module",
   "scripts": {

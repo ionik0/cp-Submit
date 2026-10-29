@@ -5,9 +5,9 @@ Upload files are produced by `npm run zip:all` in `.output/`.
 
 | Store | Upload | Extra |
 |---|---|---|
-| Chrome Web Store | `cp-extension-<ver>-chrome.zip` | promo tile `store/promo-small-440x280.png`, optional marquee `store/promo-marquee-1400x560.png` |
-| Firefox Add-ons | `cp-extension-<ver>-firefox.zip` | source code: `cp-extension-<ver>-sources.zip` |
-| Edge Add-ons | `cp-extension-<ver>-edge.zip` | same images as Chrome |
+| Chrome Web Store | `cp-submit-<ver>-chrome.zip` | promo tile `store/promo-small-440x280.png`, optional marquee `store/promo-marquee-1400x560.png` |
+| Firefox Add-ons | `cp-submit-<ver>-firefox.zip` | source code: `cp-submit-<ver>-sources.zip` |
+| Edge Add-ons | `cp-submit-<ver>-edge.zip` | same images as Chrome |
 
 ---
 
@@ -45,12 +45,12 @@ FEATURES
 PRIVACY
 CP Submit collects no data. It has no servers, no analytics and no accounts. Your code and settings stay in your browser, and the extension only talks to codeforces.com and atcoder.jp, as you.
 
-Open source (MIT): https://github.com/ionik0/cp-extension
+Open source (MIT): https://github.com/ionik0/cp-Submit
 
 ## Links
-- Homepage / support: https://github.com/ionik0/cp-extension
-- Issues: https://github.com/ionik0/cp-extension/issues
-- Privacy policy: https://github.com/ionik0/cp-extension#privacy--permissions
+- Homepage / support: https://github.com/ionik0/cp-Submit
+- Issues: https://github.com/ionik0/cp-Submit/issues
+- Privacy policy: https://github.com/ionik0/cp-Submit#privacy--permissions
 
 ---
 
