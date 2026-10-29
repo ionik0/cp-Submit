@@ -207,7 +207,9 @@ export default function App() {
   // Follow the active tab; keep the last problem when the user wanders to a non-problem tab.
   useEffect(() => {
     const refresh = async () => {
-      const [t] = await browser.tabs.query({ active: true, currentWindow: true });
+      // Last focused *normal* window: correct both inside a side panel and from the companion window (Safari/Opera).
+      const win = await browser.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
+      const [t] = win?.id != null ? await browser.tabs.query({ active: true, windowId: win.id }) : [];
       if (t?.id == null || helperTabs.has(t.id)) return;
       setActiveUrl(t.url ?? '');
       if (t.url && t.status === 'complete') void openProblem(t.id, t.url);

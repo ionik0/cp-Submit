@@ -1,15 +1,16 @@
 import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
-import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 import { THEMES } from '@/lib/themes';
 
 // Bundle Monaco locally: extension CSP forbids @monaco-editor/react's default CDN loader.
-self.MonacoEnvironment = {
-  getWorker: (_id: string, label: string) =>
-    label === 'typescript' || label === 'javascript' ? new TsWorker() : new EditorWorker(),
-};
+self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 loader.config({ monaco });
+
+// JS/TS IntelliSense would need Monaco's 6.7 MB TypeScript worker (too large for Firefox's validator);
+// switching the language service off keeps JS syntax highlighting without ever requesting that worker.
+monaco.typescript.javascriptDefaults.setModeConfiguration({});
+monaco.typescript.typescriptDefaults.setModeConfiguration({});
 
 const hex = (c: string) => c.slice(1);
 for (const t of THEMES) {
