@@ -150,17 +150,17 @@ Open the generated Xcode project, run it, then enable the extension in **Safari 
 
 ```mermaid
 flowchart TD
-    A([Click Submit]) --> B[Fetch the submit form<br/>inside your CF/AtCoder tab]
-    B -->|not logged in| L[/Log in link shown/]
-    B --> C{Human check<br/>on the form?}
-    C -- no --> D[Same-origin POST<br/>real cookies + browser]
-    D -->|accepted| V([Live verdict in panel])
+    A([Submit]) --> B[Load submit form<br/>in your tab]
+    B -->|logged out| L[/Log-in link/]
+    B --> C{Human<br/>check?}
+    C -->|no| D[Direct POST<br/>your session]
+    D -->|accepted| V([Live verdict])
     D -->|challenged| E
-    C -- yes --> E[Open the real submit page<br/>code + language filled in]
-    E --> F{Check passes<br/>by itself?}
-    F -- yes --> G[Click the site's own Submit<br/>close tab, return to problem]
+    C -->|yes| E[Open real page<br/>code filled in]
+    E --> F{Passes<br/>by itself?}
+    F -->|yes| G[Auto-submit<br/>back to problem]
     G --> V
-    F -- needs a click --> H[You click once<br/>code is already there]
+    F -->|no| H[You click once]
     H --> V
 ```
 
