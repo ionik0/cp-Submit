@@ -1,7 +1,7 @@
 import { hasHumanCheck, hiddenInputs, isChallenge, isSubmitPage, mergeFields, parseHtml, preText, textOf } from '../html';
 import { toLanguages } from '../languages';
-import type { PageIO, Problem, RunResult, SubmitContext, SubmitOutcome, Verdict } from '../types';
-import { type Platform, parseJson, pollDelay, sleep } from './platform';
+import type { PageRequest, Problem, RunResult, SubmitOutcome, Verdict } from '../types';
+import { type Platform, parseJson, pollRun } from './platform';
 
 const ORIGIN = 'https://codeforces.com';
 // Static browser-fingerprint value the CF web client sends; used only if the page didn't expose its own.
@@ -84,6 +84,7 @@ export const codeforces: Platform = {
   id: 'codeforces',
   label: 'Codeforces',
   origin: ORIGIN,
+  parallelRuns: true,
 
   isProblemUrl: (url) => parseCfUrl(url) !== null,
 
@@ -136,6 +137,12 @@ export const codeforces: Platform = {
     };
   },
 
+  isResultsPage: (url) => /\/(my|status)\/?$/.test(new URL(url).pathname),
+
+  submissionIdFrom: (doc) => doc.querySelector('tr[data-submission-id]')?.getAttribute('data-submission-id') ?? null,
+
+  submitErrors: (doc) => Array.from(doc.querySelectorAll('span.error'), (e) => textOf(e)).filter(Boolean),
+
   async submit(io, p, ctx, langId, code): Promise<SubmitOutcome> {
     const g = await io.globals(['_ftaa', '_bfaa']);
     const submitPage = codeforces.submitPageUrl(p);
@@ -152,17 +159,14 @@ export const codeforces: Platform = {
       ['sourceCodeConfirmed', 'true'],
       ['_tta', '594'],
     ]);
-    const res = await io.request({ url: action, method: 'POST', form: fields, multipart: true });
+    const res = await io.request({ url: action, method: 'POST', form: fields, multipart: true, timeoutMs: 45_000 });
     if (!res.ok) return { kind: 'error', message: `Network error: ${res.error}` };
     if (isChallenge(res)) return { kind: 'challenge' };
     if (codeforces.isLoginRedirect(res.url)) return { kind: 'logged-out' };
     const doc = parseHtml(res.text);
-    if (!isSubmitPage(res.url)) {
-      const row = doc.querySelector('tr[data-submission-id]');
-      return { kind: 'submitted', submissionId: row?.getAttribute('data-submission-id') ?? null };
-    }
+    if (!isSubmitPage(res.url)) return { kind: 'submitted', submissionId: codeforces.submissionIdFrom(doc) };
     if (res.status === 429) return { kind: 'error', message: 'Rate limited by Codeforces — wait a few seconds.' };
-    const errors = Array.from(doc.querySelectorAll('span.error'), (e) => textOf(e)).filter(Boolean);
+    const errors = codeforces.submitErrors(doc);
     // No field error to show means the form wanted something we can't send (e.g. a human check): use the real page.
     if (hasHumanCheck(doc) || !errors.length) return { kind: 'challenge' };
     return { kind: 'error', message: errors.join(' · ') };
@@ -176,16 +180,17 @@ export const codeforces: Platform = {
     return row ? parseCfVerdictRow(row) : null;
   },
 
-  async runTest(io, p, ctx, langId, code, input, signal): Promise<RunResult> {
+  async runTest(io, p, csrf, langId, code, input, signal): Promise<RunResult> {
     const url = `${ORIGIN}/data/customtest`;
-    const headers = { 'X-Csrf-Token': ctx.csrf };
+    const headers = { 'X-Csrf-Token': csrf };
     const res = await io.request({
       url,
       method: 'POST',
       headers,
+      timeoutMs: 45_000,
       form: [
         ['action', 'submitSourceCode'],
-        ['csrf_token', ctx.csrf],
+        ['csrf_token', csrf],
         ['source', code],
         ['sourceCode', code],
         ['tabSize', '4'],
@@ -194,31 +199,35 @@ export const codeforces: Platform = {
         ['communityCode', ''],
       ],
     });
-    if (!res.ok) return { status: 'ERR', stdout: '', info: `Network error: ${res.error}` };
+    if (!res.ok) return { status: 'ERR', stdout: '', info: `Network error: ${res.error}`, rejected: true };
     if (isChallenge(res)) return { status: 'ERR', stdout: '', info: 'Cloudflare check pending — pass it in a Codeforces tab, then retry.' };
     const sub = parseJson<{ customTestSubmitId?: number | string; error?: string }>(res);
     const submitId = sub?.customTestSubmitId;
-    if (!submitId) return { status: 'ERR', stdout: '', info: sub?.error ?? `Custom invocation rejected (HTTP ${res.status}).` };
+    if (!submitId) return { status: 'ERR', stdout: '', info: sub?.error ?? `Custom invocation rejected (HTTP ${res.status}).`, rejected: true };
 
-    const deadline = Date.now() + 60_000;
-    for (let i = 0; Date.now() < deadline; i++) {
-      await sleep(pollDelay(i), signal);
-      const poll = await io.request({
-        url,
-        method: 'POST',
-        headers,
-        form: [
-          ['action', 'getVerdict'],
-          ['customTestSubmitId', String(submitId)],
-          ['csrf_token', ctx.csrf],
-          ['communityCode', ''],
-        ],
-      });
-      const r = parseJson<{ output?: string | null; stat?: string; verdict?: string }>(poll);
-      if (!r || r.output == null) continue;
-      return classifyCfRun(r.output, r.stat ?? '', r.verdict);
-    }
-    return { status: 'ERR', stdout: '', info: 'Timed out waiting for Codeforces custom invocation.' };
+    const poll: PageRequest = {
+      url,
+      method: 'POST',
+      headers,
+      timeoutMs: 15_000,
+      form: [
+        ['action', 'getVerdict'],
+        ['customTestSubmitId', String(submitId)],
+        ['csrf_token', csrf],
+        ['communityCode', ''],
+      ],
+    };
+    return pollRun(
+      io,
+      'Codeforces',
+      poll,
+      (reply) => {
+        const r = parseJson<{ output?: string | null; stat?: string; verdict?: string }>(reply);
+        if (!r) return undefined;
+        return r.output == null ? null : classifyCfRun(r.output, r.stat ?? '', r.verdict);
+      },
+      signal,
+    );
   },
 
   formSpec: (p, langId) => ({
@@ -228,6 +237,8 @@ export const codeforces: Platform = {
       ['input[name="submittedProblemCode"]', p.contestId + p.index],
     ],
     codeSelector: 'textarea[name="source"]',
+    fileSelector: 'input[type="file"][name="sourceFile"]',
+    submitSelector: '#sidebarSubmitButton',
   }),
 };
 

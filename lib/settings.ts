@@ -1,6 +1,6 @@
 import { storage } from 'wxt/utils/storage';
 import type { ThemeId } from './themes';
-import type { LangFamily, PlatformId } from './types';
+import type { LangFamily, Language, PlatformId } from './types';
 
 export type ThemePref = 'system' | 'light' | 'dark' | ThemeId;
 
@@ -49,6 +49,9 @@ export function withDefaults(s: Partial<Settings> | null | undefined): Settings 
 export const templatesItem = storage.defineItem<Partial<Record<LangFamily, string>>>('local:templates', {
   fallback: {},
 });
+
+/** Last language list seen per site: Run and Submit stay usable when the site is too busy to send it again. */
+export const languagesItem = storage.defineItem<Partial<Record<PlatformId, Language[]>>>('local:languages', { fallback: {} });
 
 export interface Draft {
   langId: string;

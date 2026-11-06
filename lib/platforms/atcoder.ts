@@ -1,7 +1,7 @@
 import { decodeBase64Utf8, hasHumanCheck, hiddenInputs, isChallenge, isSubmitPage, mergeFields, parseHtml, preText, textOf } from '../html';
 import { toLanguages } from '../languages';
-import type { Problem, RunResult, SubmitOutcome, Verdict } from '../types';
-import { type Platform, parseJson, pollDelay, sleep } from './platform';
+import type { PageRequest, Problem, RunResult, SubmitOutcome, Verdict } from '../types';
+import { type Platform, parseJson, pollRun } from './platform';
 
 const ORIGIN = 'https://atcoder.jp';
 
@@ -159,6 +159,13 @@ export const atcoder: Platform = {
     };
   },
 
+  isResultsPage: (url) => /\/submissions\/me\/?$/.test(new URL(url).pathname),
+
+  submissionIdFrom: (doc) => Array.from(doc.querySelectorAll('table tbody tr')).map(parseAcVerdictRow).find(Boolean)?.id ?? null,
+
+  submitErrors: (doc) =>
+    Array.from(doc.querySelectorAll('.alert-danger, .alert-warning'), (e) => textOf(e).replace(/^×\s*/, '')).filter((m) => m && !/^error\.?$/i.test(m)),
+
   async submit(io, p, ctx, langId, code): Promise<SubmitOutcome> {
     const fields = mergeFields(ctx.hidden, [
       ['data.TaskScreenName', p.index],
@@ -167,17 +174,13 @@ export const atcoder: Platform = {
       ['csrf_token', ctx.csrf],
     ]);
     const url = new URL(ctx.action || `/${p.base}/submit`, ORIGIN).href;
-    const res = await io.request({ url, method: 'POST', form: fields });
+    const res = await io.request({ url, method: 'POST', form: fields, timeoutMs: 45_000 });
     if (!res.ok) return { kind: 'error', message: `Network error: ${res.error}` };
     if (isChallenge(res)) return { kind: 'challenge' };
     if (atcoder.isLoginRedirect(res.url)) return { kind: 'logged-out' };
     const doc = parseHtml(res.text);
-    if (!isSubmitPage(res.url)) {
-      const row = Array.from(doc.querySelectorAll('table tbody tr')).map(parseAcVerdictRow).find(Boolean);
-      return { kind: 'submitted', submissionId: row?.id ?? null };
-    }
-    const msg = Array.from(doc.querySelectorAll('.alert-danger, .alert-warning'), (e) => textOf(e).replace(/^×\s*/, ''))
-      .filter((m) => m && !/^error\.?$/i.test(m));
+    if (!isSubmitPage(res.url)) return { kind: 'submitted', submissionId: atcoder.submissionIdFrom(doc) };
+    const msg = atcoder.submitErrors(doc);
     // A bare "Error." is AtCoder's answer to a missing Turnstile token: submit through the real page instead.
     if (hasHumanCheck(doc) || !msg.length) return { kind: 'challenge' };
     return { kind: 'error', message: msg.join(' · ') };
@@ -200,32 +203,35 @@ export const atcoder: Platform = {
     return (id ? rows.find((v) => v.id === id) : rows[0]) ?? null;
   },
 
-  async runTest(io, p, ctx, langId, code, input, signal): Promise<RunResult> {
+  async runTest(io, p, csrf, langId, code, input, signal): Promise<RunResult> {
     const res = await io.request({
       url: `${ORIGIN}/${p.base}/custom_test/submit/json`,
       method: 'POST',
+      timeoutMs: 45_000,
       form: [
         ['data.LanguageId', langId],
         ['sourceCode', code],
         ['input', input],
-        ['csrf_token', ctx.csrf],
+        ['csrf_token', csrf],
       ],
     });
-    if (!res.ok) return { status: 'ERR', stdout: '', info: `Network error: ${res.error}` };
+    if (!res.ok) return { status: 'ERR', stdout: '', info: `Network error: ${res.error}`, rejected: true };
     if (isChallenge(res)) return { status: 'ERR', stdout: '', info: 'Cloudflare check pending — pass it in an AtCoder tab, then retry.' };
     if (res.status >= 400) {
       const err = parseJson<{ error?: string }>(res)?.error;
-      return { status: 'ERR', stdout: '', info: err ?? `Custom test rejected (HTTP ${res.status}).` };
+      return { status: 'ERR', stdout: '', info: err ?? `Custom test rejected (HTTP ${res.status}).`, rejected: true };
     }
-    const deadline = Date.now() + 60_000;
-    for (let i = 0; Date.now() < deadline; i++) {
-      await sleep(pollDelay(i), signal);
-      const poll = await io.request({ url: `${ORIGIN}/${p.base}/custom_test/json?reload=true` });
-      const j = parseJson<AcCustomResult>(poll);
-      const r = j && readAcCustomResult(j, code, input);
-      if (r) return r;
-    }
-    return { status: 'ERR', stdout: '', info: 'Timed out waiting for AtCoder custom test.' };
+    const poll: PageRequest = { url: `${ORIGIN}/${p.base}/custom_test/json?reload=true`, timeoutMs: 15_000 };
+    return pollRun(
+      io,
+      'AtCoder',
+      poll,
+      (reply) => {
+        const j = reply.status < 400 ? parseJson<AcCustomResult>(reply) : null;
+        return j ? readAcCustomResult(j, code, input) : undefined;
+      },
+      signal,
+    );
   },
 
   formSpec: (p, langId) => ({

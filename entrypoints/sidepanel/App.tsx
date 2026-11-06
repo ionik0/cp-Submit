@@ -28,6 +28,7 @@ import {
 } from '@/lib/session';
 import {
   DEFAULT_SETTINGS,
+  languagesItem,
   loadCode,
   saveCode,
   type Settings,
@@ -36,7 +37,7 @@ import {
   withDefaults,
 } from '@/lib/settings';
 import { SHORTCUTS, type ShortcutAction } from '@/lib/shortcuts';
-import type { LangFamily, Language, Problem } from '@/lib/types';
+import type { LangFamily, Language, PlatformId, Problem, SubmitContext } from '@/lib/types';
 
 interface Loaded {
   platform: Platform;
@@ -67,6 +68,10 @@ const btn = 'rounded px-3 py-1 text-xs font-medium text-white disabled:opacity-4
 // Pause between submissions: avoids CF/AtCoder rate limits and duplicate submits.
 const SUBMIT_COOLDOWN_S = 5;
 
+function rememberLanguages(platform: PlatformId, languages: Language[]) {
+  void languagesItem.getValue().then((all) => languagesItem.setValue({ ...all, [platform]: languages }));
+}
+
 const OFF_PROBLEM_NOTICE = `/*
   Code Editor Access:
 
@@ -96,6 +101,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [ctx, setCtx] = useState<ContextResult | { kind: 'loading' }>({ kind: 'loading' });
   const [langId, setLangId] = useState('');
+  // The code's language family while the language list itself isn't known yet.
+  const [knownFamily, setKnownFamily] = useState<LangFamily | null>(null);
   const [code, setCode] = useState('');
   const [cursor, setCursor] = useState<CursorRequest>();
   const [confirmReset, setConfirmReset] = useState(false);
@@ -142,13 +149,31 @@ export default function App() {
   const languages: Language[] = ctx.kind === 'ok' ? ctx.ctx.languages : [];
   const groups = useMemo(() => groupLanguages(languages, settings.preferredFamily), [languages, settings.preferredFamily]);
   const language = languages.find((l) => l.id === langId);
-  const family: LangFamily = language?.family ?? settings.preferredFamily;
+  const family: LangFamily = language?.family ?? knownFamily ?? settings.preferredFamily;
+  const familyRef = useRef(family);
+  familyRef.current = family;
+  const langIdRef = useRef(langId);
+  langIdRef.current = langId;
 
   const applyTemplate = (fam: LangFamily) => {
     const t = templateFor(templatesRef.current, fam);
     setCode(t.code);
     setCursor({ offset: t.cursor, nonce: Date.now() });
   };
+
+  // A freshly fetched context replaces whatever was in use; the current code's language family is kept where possible.
+  const adoptContext = useCallback((platform: Platform, c: SubmitContext) => {
+    setCtx({ kind: 'ok', ctx: c });
+    rememberLanguages(platform.id, c.languages);
+    if (c.languages.some((l) => l.id === langIdRef.current)) return;
+    const s = settingsRef.current;
+    const fam = familyRef.current;
+    const l =
+      c.languages.find((x) => x.id === s.lastLanguage[platform.id] && x.family === fam) ??
+      c.languages.find((x) => x.family === fam) ??
+      groupLanguages(c.languages, s.preferredFamily)[0]?.languages[0];
+    setLangId(l?.id ?? '');
+  }, []);
 
   const openProblem = useCallback(async (tabId: number, url: string) => {
     let found: Awaited<ReturnType<typeof readProblem>>;
@@ -158,7 +183,7 @@ export default function App() {
       return;
     }
     if (!found) return;
-    const { platform, problem } = found;
+    const { platform, problem, pageCtx } = found;
     if (loadedKey.current === problem.key) {
       setLoaded((l) => (l ? { ...l, tabId } : l));
       return;
@@ -168,22 +193,24 @@ export default function App() {
     setLoading(true);
     setLoaded({ platform, problem, tabId });
     setTests(testsFromSamples(problem));
-    setCtx({ kind: 'loading' });
+    setCtx(pageCtx ? { kind: 'ok', ctx: pageCtx } : { kind: 'loading' });
 
-    const [draft, c] = await Promise.all([
-      loadCode(problem.key),
-      loadContext(platform, problem, tabId).catch((e): ContextResult => ({ kind: 'error', message: String(e) })),
-    ]);
+    // Only local data from here on: the code is on screen and usable without waiting for the site.
+    const [draft, cache] = await Promise.all([loadCode(problem.key), languagesItem.getValue()]);
     if (loadedKey.current !== problem.key) return;
-    setCtx(c);
-    const langs = c.kind === 'ok' ? c.ctx.languages : [];
+    const cached = cache[platform.id] ?? [];
+    const langs = pageCtx?.languages ?? cached;
+    if (!pageCtx && cached.length) {
+      setCtx({ kind: 'ok', ctx: { languages: cached, csrf: '', user: null, humanCheck: false, hidden: [], action: '' } });
+    }
     const s = settingsRef.current;
     const pick =
       langs.find((l) => l.id === draft?.langId) ??
       langs.find((l) => l.id === s.lastLanguage[platform.id]) ??
       groupLanguages(langs, s.preferredFamily)[0]?.languages[0];
-    const fam = pick?.family ?? s.preferredFamily;
+    const fam = pick?.family ?? draft?.family ?? s.preferredFamily;
     codesRef.current = draft?.codes ?? {};
+    setKnownFamily(fam);
     setLangId(pick?.id ?? draft?.langId ?? '');
     const saved = codesRef.current[fam];
     if (saved != null) setCode(saved);
@@ -193,7 +220,14 @@ export default function App() {
       setCursor({ offset: t.cursor, nonce: Date.now() });
     }
     setLoading(false);
-  }, []);
+
+    if (pageCtx) return rememberLanguages(platform.id, pageCtx.languages);
+    const c = await loadContext(platform, problem, tabId).catch((e): ContextResult => ({ kind: 'error', message: String(e) }));
+    if (loadedKey.current !== problem.key) return;
+    if (c.kind === 'ok') adoptContext(platform, c.ctx);
+    // With cached languages a busy or challenged site is no reason to get in the way; Run and Submit report their own trouble.
+    else if (c.kind === 'logged-out' || !cached.length) setCtx(c);
+  }, [adoptContext]);
 
   // Follow the active tab; keep the last problem when the user wanders to a non-problem tab.
   useEffect(() => {
@@ -254,44 +288,53 @@ export default function App() {
 
   const retryContext = async () => {
     if (!loaded) return;
+    setKnownFamily(family);
     setCtx({ kind: 'loading' });
     const c = await loadContext(loaded.platform, loaded.problem, loaded.tabId).catch(
       (e): ContextResult => ({ kind: 'error', message: String(e) }),
     );
-    setCtx(c);
-    if (c.kind === 'ok' && !c.ctx.languages.some((l) => l.id === langId)) {
-      const s = settingsRef.current;
-      const l =
-        c.ctx.languages.find((x) => x.id === s.lastLanguage[loaded.platform.id]) ??
-        c.ctx.languages.find((x) => x.family === family) ??
-        groupLanguages(c.ctx.languages, s.preferredFamily)[0]?.languages[0];
-      setLangId(l?.id ?? '');
-    }
+    if (c.kind === 'ok') adoptContext(loaded.platform, c.ctx);
+    else setCtx(c);
   };
 
   // Editor is live only while the active tab is a problem page (like Codeforces Lite); elsewhere a notice is shown.
   // Code stays saved per problem and returns when the user is back on it.
   const onProblem = !!loaded && !!activeUrl && loaded.platform.isProblemUrl(activeUrl);
-  const canAct = !!loaded && ctx.kind === 'ok' && !!langId && !loading;
+  // Run and Submit need only a language: tokens are read from the live page, so a failed form fetch doesn't block them.
+  const canAct = !!loaded && !!langId && !loading && ctx.kind !== 'logged-out';
   const running = tests.some((t) => t.result === 'running');
 
-  const runTests = async (only?: number) => {
-    if (!loaded || ctx.kind !== 'ok' || !langId) return;
+  const runTests = async () => {
+    if (!loaded || !langId) return;
     runAbort.current?.abort();
     const ac = new AbortController();
     runAbort.current = ac;
-    const targets = tests.filter((t) => only == null || t.id === only);
+    const csrf = ctx.kind === 'ok' ? ctx.ctx.csrf : '';
     setTab('tests');
-    setTests((ts) => ts.map((t) => (targets.some((x) => x.id === t.id) ? { ...t, result: 'running' } : t)));
-    for (const t of targets) {
-      const r = await runOne(loaded.platform, loaded.problem, loaded.tabId, ctx.ctx, langId, code, t.input, t.expected, ac.signal).catch(
+    setTests((ts) => ts.map((t) => ({ ...t, result: 'running', since: undefined })));
+    const runTarget = async (t: TestCase) => {
+      setTests((ts) => ts.map((x) => (x.id === t.id ? { ...x, since: Date.now() } : x)));
+      const r = await runOne(loaded.platform, loaded.problem, loaded.tabId, csrf, langId, code, t.input, t.expected, ac.signal).catch(
         (e: unknown): TimedResult => ({ status: 'ERR', stdout: '', info: e instanceof DOMException && e.name === 'AbortError' ? 'Cancelled' : String(e) }),
       );
       if (ac.signal.aborted) {
         setTests((ts) => ts.map((x) => (x.result === 'running' ? { ...x, result: undefined } : x)));
-        return;
+        return null;
       }
       setTests((ts) => ts.map((x) => (x.id === t.id ? { ...x, result: r, open: x.open || r.status !== 'AC' } : x)));
+      return r;
+    };
+    if (loaded.platform.parallelRuns) {
+      // Samples wait in the judge queue together instead of one after another.
+      const results = await Promise.all(tests.map(runTarget));
+      // Any the judge refused at the same moment get a second chance one at a time.
+      for (const [i, r] of results.entries()) {
+        if (!r?.rejected || ac.signal.aborted) continue;
+        setTests((ts) => ts.map((x) => (x.id === tests[i]!.id ? { ...x, result: 'running' } : x)));
+        await runTarget(tests[i]!);
+      }
+    } else {
+      for (const t of tests) await runTarget(t);
     }
   };
 
@@ -330,7 +373,7 @@ export default function App() {
         message: `${platform.label} wants a human check. Its submit page is open with your code filled in (also copied) — finish there.`,
       });
     } else {
-      updateSub(key, { state: 'tracking', message: r.via === 'page' ? 'Submitted via the site’s own form (human check passed).' : undefined });
+      updateSub(key, { state: 'tracking', message: r.via === 'page' ? 'Submitted via the site’s own form.' : undefined });
     }
     const sentMs = performance.now() - startedAt;
     const id = r.kind === 'submitted' ? r.submissionId : null;
@@ -340,8 +383,9 @@ export default function App() {
         state: v.final ? 'done' : 'tracking',
         timing: `sent in ${secs(sentMs)}${v.final ? ` · verdict after ${secs(performance.now() - startedAt - sentMs)}` : ''}`,
       }),
+      (message) => updateSub(key, { message }),
     );
-    if (!v) updateSub(key, { state: 'error', message: 'Stopped tracking — check your submissions page.' });
+    if (!v?.final) updateSub(key, { state: 'error', message: 'Stopped tracking — check your submissions page.' });
   };
 
   // Global shortcuts (capture phase, so Monaco doesn't swallow them).
@@ -538,9 +582,7 @@ export default function App() {
                     <TestCard
                       key={t.id}
                       test={t}
-                      disabled={!canAct || running}
                       onChange={(patch) => setTests((ts) => ts.map((x) => (x.id === t.id ? { ...x, ...patch } : x)))}
-                      onRun={() => void runTests(t.id)}
                       onDelete={() => setTests((ts) => ts.filter((x) => x.id !== t.id))}
                     />
                   ))}

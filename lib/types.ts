@@ -94,6 +94,10 @@ export interface Verdict {
 export interface FormSpec {
   values: [string, string][];
   codeSelector: string;
+  /** Forms that only take an uploaded file (Codeforces' problem-page sidebar). */
+  fileSelector?: string;
+  /** The form's submit button, when it isn't simply the form's `[type="submit"]`. */
+  submitSelector?: string;
 }
 
 export type RunStatus = 'AC' | 'WA' | 'RE' | 'TLE' | 'CE' | 'OK' | 'ERR';
@@ -103,4 +107,6 @@ export interface RunResult {
   stdout: string;
   stderr?: string;
   info?: string;
+  /** The judge refused to start this run at all (nothing is queued), so trying again later is safe. */
+  rejected?: boolean;
 }

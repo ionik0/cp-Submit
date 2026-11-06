@@ -150,13 +150,13 @@ Open the generated Xcode project, run it, then enable the extension in **Safari 
 
 ```mermaid
 flowchart TD
-    A([Submit]) --> B[Load submit form<br/>in your tab]
-    B -->|logged out| L[/Log-in link/]
-    B --> C{Human<br/>check?}
-    C -->|no| D[Direct POST<br/>your session]
-    D -->|accepted| V([Live verdict])
-    D -->|challenged| E
-    C -->|yes| E[Open real page<br/>code filled in]
+    A([Submit]) --> B{Form on the<br/>problem page?}
+    B -->|yes| C[Fill and click it<br/>in your tab]
+    C -->|accepted| V([Live verdict])
+    C -->|rejected or no reply| R[/Shows the reason,<br/>never resubmits/]
+    B -->|no| D[Direct POST<br/>your session]
+    D -->|accepted| V
+    D -->|challenged| E[Open real page<br/>code filled in]
     E --> F{Passes<br/>by itself?}
     F -->|yes| G[Auto-submit<br/>back to problem]
     G --> V
@@ -164,7 +164,7 @@ flowchart TD
     H --> V
 ```
 
-The extension never fakes a browser, a fingerprint or a check. It sends what your browser would send anyway and lets the site's own page handle verification. Everything has a timeout, and every pending submission keeps an **Open submit page** link.
+The extension never fakes a browser, a fingerprint or a check. It uses the site's own form wherever one is available, so your problem tab visits the results page and comes straight back after each submit. If the site asks for a verification, the panel tells you to look at the problem tab and waits up to 15 minutes while you pass it, then tracks the verdict. Everything has a timeout, and every pending submission keeps an **Open submit page** link.
 
 ---
 
@@ -201,13 +201,13 @@ It has no access to any other website and does not read your browsing history.
 <details>
 <summary><b>Does it work during live contests?</b></summary>
 
-Yes. It uses the same problem, submit, custom-test and "my submissions" pages that contests use. During big rounds Codeforces enables heavier Cloudflare checks, and CP Submit then uses the real-page fallback, which is a few seconds slower. Before relying on it in a rated contest, try it once in a virtual contest or the AtCoder practice contest.
+Yes. It uses the same problem, submit, custom-test and "my submissions" pages that contests use. Opening a problem reads the languages from the page already open, without a request to the site. Run depends on the site's custom-test queue, which can be slow during big rounds: the panel shows how long a run has been waiting and reports the reason if the site stops answering. Before relying on it in a rated contest, try it once in a virtual contest or the AtCoder practice contest.
 </details>
 
 <details>
 <summary><b>Why is "Run" a few seconds per test?</b></summary>
 
-Tests run on the platform's real judge, which compiles and executes your code. That gives you exact-compiler results, but each run includes the judge's queue and compile time, especially for Java. AtCoder allows one custom test at a time, so samples run one after another. Every result shows a <code>send · wait · polls</code> timing line.
+Tests run on the platform's real judge, which compiles and executes your code. That gives you exact-compiler results, but each run includes the judge's queue and compile time, especially for Java. Codeforces samples run together; AtCoder allows one custom test at a time, so its samples run one after another. While a run waits, the panel shows how long it has been in the queue, and it reports the reason if the site stops answering. Every result shows a <code>send · wait · polls</code> timing line.
 </details>
 
 <details>

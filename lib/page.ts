@@ -40,6 +40,17 @@ function readGlobals(names: string[]): Record<string, string | null> {
   return out;
 }
 
+/** Runs in the platform tab (MAIN world): the page's current CSRF token, however this site exposes it. */
+export function readCsrf(): string | null {
+  const w = window as unknown as { csrfToken?: unknown };
+  return (
+    document.querySelector('meta[name="X-Csrf-Token"]')?.getAttribute('content') ||
+    document.querySelector('.csrf-token')?.getAttribute('data-csrf') ||
+    document.querySelector<HTMLInputElement>('input[name="csrf_token"]')?.value ||
+    (typeof w.csrfToken === 'string' ? w.csrfToken : null)
+  );
+}
+
 function readHtml(): string {
   return document.documentElement.outerHTML;
 }
@@ -76,8 +87,9 @@ export async function fillAndSubmit(spec: FormSpec & { code: string }, autoSubmi
     ace?: { edit(id: string): { setValue(v: string, cursor: number): void } };
   };
   const ta = document.querySelector<HTMLTextAreaElement>(spec.codeSelector);
-  const form = ta?.closest('form');
-  if (!ta || !form) return 'no-form';
+  const file = !ta && spec.fileSelector ? document.querySelector<HTMLInputElement>(spec.fileSelector) : null;
+  const form = (ta ?? file)?.closest('form');
+  if (!form) return 'no-form';
   for (const [sel, v] of spec.values) {
     document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(sel).forEach((el) => {
       el.value = v;
@@ -85,12 +97,19 @@ export async function fillAndSubmit(spec: FormSpec & { code: string }, autoSubmi
       w.jQuery?.(el).trigger('change');
     });
   }
-  ta.value = spec.code;
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
-  try {
-    if (w.ace && document.getElementById('editor')) w.ace.edit('editor').setValue(spec.code, -1);
-  } catch {
-    /* page uses a plain textarea */
+  if (ta) {
+    ta.value = spec.code;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    try {
+      if (w.ace && document.getElementById('editor')) w.ace.edit('editor').setValue(spec.code, -1);
+    } catch {
+      /* page uses a plain textarea */
+    }
+  } else if (file) {
+    const dt = new DataTransfer();
+    dt.items.add(new File([spec.code], 'solution.txt', { type: 'text/plain' }));
+    file.files = dt.files;
+    file.dispatchEvent(new Event('change', { bubbles: true }));
   }
   form.scrollIntoView({ block: 'center' });
   if (!autoSubmit) return 'needs-user';
@@ -100,44 +119,48 @@ export async function fillAndSubmit(spec: FormSpec & { code: string }, autoSubmi
   if (document.querySelector('[data-sitekey], .cf-turnstile')) {
     for (let i = 0; i < 40 && !token(); i++) await new Promise((r) => setTimeout(r, 200));
   }
-  const button = form.querySelector<HTMLElement>('[type="submit"]');
-  if (button) button.click();
-  else form.requestSubmit();
+  const button = (file && spec.submitSelector && document.querySelector<HTMLElement>(spec.submitSelector)) || form.querySelector<HTMLElement>('[type="submit"]');
+  // Click after returning: navigating away first would lose this result, and a lost result could look like "nothing was submitted".
+  setTimeout(() => (button ? button.click() : form.requestSubmit()), 50);
   return 'submitted';
 }
+
+// Time allowed beyond a request's own timeout, and for quick in-page reads.
+const SCRIPT_GRACE_MS = 5000;
 
 export class TabIO implements PageIO {
   constructor(readonly tabId: number) {}
 
+  /** Runs a function in the tab. A closed, navigating or frozen tab gives undefined rather than a rejection or an endless wait. */
+  private async inject<A extends unknown[], R>(func: (...args: A) => R, args: A, world: 'MAIN' | 'ISOLATED', ms: number): Promise<Awaited<R> | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), ms)));
+    const run = browser.scripting
+      .executeScript({ target: { tabId: this.tabId }, world, func, args } as never)
+      .then((r) => (r as unknown as { result?: Awaited<R> }[])[0]?.result)
+      .catch(() => undefined);
+    return Promise.race([run, timedOut]).finally(() => clearTimeout(timer));
+  }
+
   async request(req: PageRequest): Promise<PageResponse> {
-    const [r] = await browser.scripting.executeScript({
-      target: { tabId: this.tabId },
-      world: 'MAIN',
-      func: pageFetch,
-      args: [req],
-    });
-    const res = r?.result as PageResponse | undefined;
+    const res = await this.inject(pageFetch, [req], 'MAIN', (req.timeoutMs ?? 20000) + SCRIPT_GRACE_MS);
     return res ?? { ok: false, status: 0, url: req.url, text: '', error: 'tab did not respond' };
   }
 
   async globals(names: string[]): Promise<Record<string, string | null>> {
-    const [r] = await browser.scripting.executeScript({
-      target: { tabId: this.tabId },
-      world: 'MAIN',
-      func: readGlobals,
-      args: [names],
-    });
-    return (r?.result as Record<string, string | null>) ?? {};
+    return (await this.inject(readGlobals, [names], 'MAIN', SCRIPT_GRACE_MS)) ?? {};
   }
 
   async harvest(): Promise<Harvest | null> {
-    const [r] = await browser.scripting.executeScript({ target: { tabId: this.tabId }, world: 'MAIN', func: harvestForm });
-    return (r?.result as Harvest | null | undefined) ?? null;
+    return (await this.inject(harvestForm, [], 'MAIN', SCRIPT_GRACE_MS)) ?? null;
+  }
+
+  async csrf(): Promise<string | null> {
+    return (await this.inject(readCsrf, [], 'MAIN', SCRIPT_GRACE_MS)) ?? null;
   }
 
   async html(): Promise<string> {
-    const [r] = await browser.scripting.executeScript({ target: { tabId: this.tabId }, func: readHtml });
-    return (r?.result as string) ?? '';
+    return (await this.inject(readHtml, [], 'ISOLATED', 2 * SCRIPT_GRACE_MS)) ?? '';
   }
 }
 
@@ -170,18 +193,63 @@ async function isUsable(tabId: number, origin: string): Promise<boolean> {
   }
 }
 
+interface HelperTab {
+  opening: Promise<number>;
+  refs: number;
+  closer?: ReturnType<typeof setTimeout>;
+}
+
+// Kept open briefly after the last user, so verdict polling doesn't open and close a tab for every check.
+const HELPER_LINGER_MS = 30_000;
+const helpers = new Map<string, HelperTab>();
+
+/** One background tab per site, however many samples or polls need it at the same moment. */
+async function acquireHelper(origin: string): Promise<{ io: TabIO; release: () => void }> {
+  let h = helpers.get(origin);
+  if (!h) {
+    const opening = browser.tabs.create({ url: `${origin}/`, active: false }).then(async (t) => {
+      await waitForTabComplete(t.id!);
+      return t.id!;
+    });
+    h = { opening, refs: 0 };
+    helpers.set(origin, h);
+  }
+  const entry = h;
+  entry.refs++;
+  clearTimeout(entry.closer);
+  const id = await entry.opening;
+  if (!(await browser.tabs.get(id).catch(() => null))) {
+    // The user closed it: start over with a new one.
+    if (helpers.get(origin) === entry) helpers.delete(origin);
+    return acquireHelper(origin);
+  }
+  return {
+    io: new TabIO(id),
+    release: () => {
+      if (--entry.refs > 0) return;
+      entry.closer = setTimeout(() => {
+        if (helpers.get(origin) === entry) helpers.delete(origin);
+        void browser.tabs.remove(id).catch(() => {});
+      }, HELPER_LINGER_MS);
+    },
+  };
+}
+
 /**
  * A loaded tab on the platform's origin to run requests from: the preferred (problem) tab,
- * any other open tab of that site, or a new background tab that is closed again on release().
+ * any other open tab of that site, or a shared background tab that is closed again after release().
  */
 export async function acquireTab(origin: string, preferredTabId?: number): Promise<{ io: TabIO; release: () => void }> {
   const noop = () => {};
-  if (preferredTabId != null && (await isUsable(preferredTabId, origin))) return { io: new TabIO(preferredTabId), release: noop };
+  if (preferredTabId != null) {
+    // The problem tab may be mid-reload (e.g. returning after a submit): worth a moment rather than opening another tab.
+    const t = await browser.tabs.get(preferredTabId).catch(() => null);
+    if (t?.url?.startsWith(origin + '/') && t.status !== 'complete') await waitForTabComplete(preferredTabId, 5000);
+    if (await isUsable(preferredTabId, origin)) return { io: new TabIO(preferredTabId), release: noop };
+  }
+  if (helpers.has(origin)) return acquireHelper(origin);
   const tabs = await browser.tabs.query({ url: `${origin}/*` });
   const open = tabs.find((t) => t.id != null && t.status === 'complete' && !t.discarded);
   if (open?.id != null) return { io: new TabIO(open.id), release: noop };
-  const created = await browser.tabs.create({ url: `${origin}/`, active: false });
-  const id = created.id!;
-  await waitForTabComplete(id);
-  return { io: new TabIO(id), release: () => void browser.tabs.remove(id).catch(noop) };
+  return acquireHelper(origin);
 }

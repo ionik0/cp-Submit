@@ -161,6 +161,12 @@ describe('codeforces verdicts', () => {
     const v = parseCfVerdictRow(row('<td class="status-verdict-cell" waiting="false">Wrong answer on test 2</td>'));
     expect(v).toMatchObject({ final: true, ok: false, label: 'Wrong answer on test 2' });
   });
+  it('reads the pretest wording of a live round', () => {
+    const cell = (text: string) => parseCfVerdictRow(row(`<td class="status-verdict-cell">${text}</td>`));
+    expect(cell('Running on pretest 3')).toMatchObject({ final: false, ok: false });
+    expect(cell('Pretests passed')).toMatchObject({ final: true, ok: true });
+    expect(cell('Wrong answer on pretest 2')).toMatchObject({ final: true, ok: false });
+  });
 });
 
 describe('codeforces custom invocation results', () => {

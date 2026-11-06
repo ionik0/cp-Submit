@@ -14,6 +14,8 @@ export interface TestCase {
   custom: boolean;
   open: boolean;
   result?: TimedResult | 'running';
+  /** When this test was sent to the judge; unset while it waits for its turn. */
+  since?: number;
 }
 
 export interface Submission {
@@ -103,6 +105,25 @@ export function TabButton({ active, onClick, children }: { active: boolean; onCl
   );
 }
 
+// After this long, the wait is the judge's queue rather than a normal run.
+const BUSY_QUEUE_S = 15;
+
+/** Live wait time, so a slow judge queue can be told apart from a frozen panel. */
+function RunningLabel({ since }: { since?: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const i = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(i);
+  }, []);
+  if (since == null) return <span className="animate-pulse text-[11px] text-zinc-500">waiting for its turn…</span>;
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return (
+    <span className="animate-pulse text-[11px] text-zinc-500" title="Running on the site's own judge, which queues custom tests during busy contests">
+      {s >= BUSY_QUEUE_S ? `judge queue busy · ${s}s` : `running · ${s}s`}
+    </span>
+  );
+}
+
 const STATUS_STYLE: Record<string, string> = {
   AC: 'bg-emerald-600',
   WA: 'bg-red-600',
@@ -115,15 +136,11 @@ const STATUS_STYLE: Record<string, string> = {
 
 export function TestCard({
   test,
-  disabled,
   onChange,
-  onRun,
   onDelete,
 }: {
   test: TestCase;
-  disabled: boolean;
   onChange: (p: Partial<TestCase>) => void;
-  onRun: () => void;
   onDelete: () => void;
 }) {
   const r = test.result;
@@ -132,11 +149,8 @@ export function TestCard({
       <div className="flex cursor-pointer items-center gap-2 px-2 py-1" onClick={() => onChange({ open: !test.open })}>
         <span className="text-zinc-400">{test.open ? '▾' : '▸'}</span>
         <span className="flex-1 font-medium">{test.label}</span>
-        {r === 'running' && <span className="animate-pulse text-[11px] text-zinc-500">running…</span>}
+        {r === 'running' && <RunningLabel since={test.since} />}
         {r && r !== 'running' && <span className={`rounded px-1.5 text-[10px] font-bold text-white ${STATUS_STYLE[r.status]}`}>{r.status}</span>}
-        <button className="text-[11px] text-blue-600 disabled:opacity-40 dark:text-blue-400" disabled={disabled} onClick={(e) => (e.stopPropagation(), onRun())}>
-          run
-        </button>
         {test.custom && (
           <button className="text-[11px] text-zinc-400 hover:text-red-500" onClick={(e) => (e.stopPropagation(), onDelete())}>
             ✕
