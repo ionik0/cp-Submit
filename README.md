@@ -55,6 +55,7 @@ It does this for **both Codeforces and AtCoder**, from one panel.
 - No Judge0, no API keys, no local compilers
 - Token-wise output comparison (float tolerance 1e-6)
 - Custom tests, plus a timing breakdown for every run
+- One **Run** button re-runs every sample and custom test
 
 </td>
 </tr>
@@ -201,7 +202,7 @@ It has no access to any other website and does not read your browsing history.
 <details>
 <summary><b>Does it work during live contests?</b></summary>
 
-Yes. It uses the same problem, submit, custom-test and "my submissions" pages that contests use. Opening a problem reads the languages from the page already open, without a request to the site. Run depends on the site's custom-test queue, which can be slow during big rounds: the panel shows how long a run has been waiting and reports the reason if the site stops answering. Before relying on it in a rated contest, try it once in a virtual contest or the AtCoder practice contest.
+Yes. It uses the same problem, submit, custom-test and "my submissions" pages that contests use. Opening a problem reads the languages from the page already open, without a request to the site. Run depends on the site's custom-test queue, which can be slow during big rounds: the panel shows how long a run has been waiting and reports the reason if the site stops answering. If Submit triggers a verification, the panel tells you to pass it in the problem tab and keeps waiting, so the verdict is still tracked. Mirror sites such as <code>mirror.codeforces.com</code> are not supported yet. Before relying on it in a rated contest, try it once in a virtual contest or the AtCoder practice contest.
 </details>
 
 <details>
